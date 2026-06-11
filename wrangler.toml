@@ -3,8 +3,8 @@ main = "_worker.js"
 compatibility_date = "2026-06-10"
 
 [vars]
-# 你的自定义客户端校验密码（UUID），建议去网上随便生成一个新的替换掉
+# 上一步为你生成的专属安全 UUID
 UUID = "d3b4a2e1-7c98-4b5a-9f12-e6d8c3a7b4f5"
 
-# 伪装网页地址。当防火墙或普通网民用浏览器打开你的节点域名时，会看到这个网页
+# 伪装网页地址（可换成你自己的个人静态博客）
 PROXY_URL = "https://www.bing.com"
