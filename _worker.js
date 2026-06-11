@@ -1,5 +1,5 @@
-// 核心配置文件：轻量级 VLESS 隧道
-// 专注于高性能、低延迟的流式转发
+// 核心配置文件：轻量级稳定版 VLESS 隧道
+// 专注于高性能、长连接保持与低延迟转发
 
 export default {
   async fetch(request, env, ctx) {
@@ -8,11 +8,10 @@ export default {
       
       // 1. 判断是否为客户端的 WebSocket 连接请求
       if (upgradeHeader === 'websocket') {
-        return await vlessOverWebSocketHandler(request, env);
+        return await vlessOverWebSocketHandler(request, env, ctx);
       }
       
       // 2. 如果是普通 Web 访问，则执行网页伪装（静态反代）
-      // 你可以在环境变量中设置 PROXY_URL，或者默认反代一个安全的静态页
       const mockUrl = env.PROXY_URL || 'https://www.bing.com';
       const url = new URL(request.url);
       const targetUrl = new URL(url.pathname + url.search, mockUrl);
@@ -29,7 +28,7 @@ export default {
 /**
  * 处理 VLESS Over WebSocket 的核心流转发
  */
-async function vlessOverWebSocketHandler(request, env) {
+async function vlessOverWebSocketHandler(request, env, ctx) {
   // 创建 WebSocket 对
   const webSocketPair = new WebSocketPair();
   const [client, server] = Object.values(webSocketPair);
@@ -38,7 +37,7 @@ async function vlessOverWebSocketHandler(request, env) {
   server.accept();
 
   let remoteSocket = null;
-  const userID = env.UUID || "88888888-8888-8888-8888-888888888888"; // 默认UUID
+  const userID = env.UUID || "d3b4a2e1-7c98-4b5a-9f12-e6d8c3a7b4f5"; // 使用为你生成的 UUID
 
   // 监听客户端发送的第一个数据包（包含 VLESS 协议头）
   server.addEventListener('message', async (event) => {
@@ -74,7 +73,7 @@ async function vlessOverWebSocketHandler(request, env) {
 
         // 解析目标地址与端口
         const addonLength = view.getUint8(17);
-        const command = view.getUint8(18 + addonLength); // 1: TCP, 2: UDP
+        const command = view.getUint8(18 + addonLength); // 1: TCP
         const targetPort = view.getUint16(19 + addonLength);
         const addressType = view.getUint8(21 + addonLength); // 1: IPv4, 2: 域名, 3: IPv6
 
@@ -116,15 +115,15 @@ async function vlessOverWebSocketHandler(request, env) {
           port: targetPort
         });
 
-        // 处理从目标网站返回的数据，原路写回 WebSocket 通道
-        ctxDotPipe(remoteSocket, server);
+        // 核心加固：利用 ctx.waitUntil 保持下游回传通道不被后台销毁
+        ctx.waitUntil(ctxDotPipe(remoteSocket, server));
 
         // 写入第一批脱壳后的原始数据
+        const writer = remoteSocket.writable.getWriter();
         if (rawPayload.byteLength > 0) {
-          const writer = remoteSocket.writable.getWriter();
           await writer.write(rawPayload);
-          writer.releaseLock();
         }
+        writer.releaseLock();
 
         // 发送 VLESS 握手成功响应给客户端 (1字节版本号 + 1字节附加信息长度)
         const responseHeader = new Uint8Array([version, 0]);
@@ -138,6 +137,7 @@ async function vlessOverWebSocketHandler(request, env) {
       }
     } catch (error) {
       server.close(1011, `建立上行链路失败: ${error.message}`);
+      if (remoteSocket) remoteSocket.close();
     }
   });
 
@@ -165,8 +165,11 @@ async function ctxDotPipe(remoteSocket, server) {
       server.send(value);
     }
   } catch (err) {
-    server.close(1011, "远端连接发生异常断开");
+    // 忽略预期的断开错误
   } finally {
-    server.close();
+    try {
+      server.close();
+      remoteSocket.close();
+    } catch (e) {}
   }
 }
